@@ -1,0 +1,96 @@
+use axum::{routing::{get, post}, Router, extract::State};
+use sqlx::postgres::PgPoolOptions;
+use std::sync::Arc;
+use tower_http::cors::CorsLayer;
+use dotenvy::dotenv;
+use std::env;
+use axum::middleware as axum_middleware;
+
+mod keywords;
+mod priority_mail;
+mod notifications;
+mod users;
+mod auth;
+mod middleware;
+mod crawler;
+
+
+// Shared application state passed into every handler
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db:                   sqlx::PgPool,
+    pub jwt_secret:           String,
+    pub google_client_id:     String,
+    pub google_client_secret: String,
+    pub google_redirect_uri:  String,
+}
+
+// In main(), build state as:
+
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    println!("🚀 Database connected successfully.");
+
+    let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let state = Arc::new(AppState {
+    db: pool,
+    jwt_secret:           env::var("JWT_SECRET").expect("JWT_SECRET must be set"),
+    google_client_id:     env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set"),
+    google_client_secret: env::var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET must be set"),
+    google_redirect_uri:  env::var("GOOGLE_REDIRECT_URI").expect("GOOGLE_REDIRECT_URI must be set"),
+});
+
+let protected = Router::new()
+    .route("/keywords",      get(keywords::list_keywords_handler))
+    .route("/priority-mail", get(priority_mail::list_priority_mail_handler))
+    .route("/priority-mail", post(priority_mail::create_priority_mail_handler))
+    .route("/notifications", get(notifications::list_notifications_handler))
+    .route("/notifications", post(notifications::create_notification_handler))
+    .route("/notifications/ws", get(notifications::notifications_ws_handler))
+    .route("/crawl", post(crawl_trigger_handler))
+    .layer(axum_middleware::from_fn_with_state(
+        state.clone(),
+        middleware::require_auth,
+    ));
+
+let public = Router::new()
+    .route("/auth/google/login",    get(auth::google_login_handler))
+    .route("/auth/google/callback", get(auth::google_callback_handler))
+    .route("/auth/refresh",         post(auth::refresh_handler));
+
+let app = Router::new()
+    .merge(protected)
+    .merge(public)
+    .layer(CorsLayer::permissive())
+    .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
+    println!("🌐 API listening on http://localhost:3001");
+
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+async fn crawl_trigger_handler(
+    State(state): State<Arc<AppState>>,
+) -> impl axum::response::IntoResponse {
+    match crawler::crawl_all_users(&state.db).await {
+        Ok(_)  => (axum::http::StatusCode::OK, "Crawl complete"),
+        Err(e) => {
+            eprintln!("Crawl error: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Crawl failed")
+        }
+    }
+}

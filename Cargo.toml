@@ -1,0 +1,25 @@
+[package]
+name = "rust-play"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+apalis = "0.7.4"
+axum = {version = "0.8.9", features =["json","macros","ws"]}
+chrono = { version = "0.4.45", features = ["serde"] }
+dotenvy = "0.15.7"
+redis = { version = "0.27", features = ["tokio-comp"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form", "query"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "ipnetwork"] }
+tokio = { version = "1.52.3", features = ["full"]}
+uuid = { version = "1.23.3", features = ["serde", "v4"] }
+ws = "0.9.2"
+oauth2        = "4.4"
+jsonwebtoken  = "9.3"
+argon2        = "0.5"        # for hashing refresh tokens before DB storage
+rand          = "0.8"        # secure token generation
+tower-http    = { version = "0.6.11", features = ["cors", "trace"] }
+ipnetwork = "0.20"
