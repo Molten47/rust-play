@@ -5,6 +5,7 @@ use tower_http::cors::CorsLayer;
 use dotenvy::dotenv;
 use std::env;
 use axum::middleware as axum_middleware;
+use tokio::time::{interval, Duration as TokioDuration};
 
 mod keywords;
 mod priority_mail;
@@ -43,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🚀 Database connected successfully.");
 
-    let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let _jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let state = Arc::new(AppState {
     db: pool,
     jwt_secret:           env::var("JWT_SECRET").expect("JWT_SECRET must be set"),
@@ -54,10 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 let protected = Router::new()
     .route("/keywords",      get(keywords::list_keywords_handler))
-    .route("/priority-mail", get(priority_mail::list_priority_mail_handler))
-    .route("/priority-mail", post(priority_mail::create_priority_mail_handler))
-    .route("/notifications", get(notifications::list_notifications_handler))
-    .route("/notifications", post(notifications::create_notification_handler))
+    .route("/priority-mail", get(priority_mail::list_priority_mail_handler).post(priority_mail::create_priority_mail_handler))
+    .route("/notifications", get(notifications::list_notifications_handler).post(notifications::create_notification_handler))
     .route("/notifications/ws", get(notifications::notifications_ws_handler))
     .route("/crawl", post(crawl_trigger_handler))
     .layer(axum_middleware::from_fn_with_state(
@@ -74,11 +73,28 @@ let app = Router::new()
     .merge(protected)
     .merge(public)
     .layer(CorsLayer::permissive())
-    .with_state(state);
+    .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
+    // ── Background crawler loop ────────────────────────────────────────────────
+{
+    let bg_state = state.clone();
+    tokio::spawn(async move {
+    let mut ticker = interval(TokioDuration::from_secs(300));
+    loop {
+        ticker.tick().await;
+        println!("⏰ Scheduled crawl starting...");
+        if let Err(e) = crawler::crawl_all_users(
+            &bg_state.db,
+            &bg_state.google_client_id,
+            &bg_state.google_client_secret,
+        ).await {
+            eprintln!("❌ Scheduled crawl failed: {}", e);
+        }
+    }
+});
+}
     println!("🌐 API listening on http://localhost:3001");
-
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -86,7 +102,11 @@ let app = Router::new()
 async fn crawl_trigger_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl axum::response::IntoResponse {
-    match crawler::crawl_all_users(&state.db).await {
+    match crawler::crawl_all_users(
+        &state.db,
+        &state.google_client_id,
+        &state.google_client_secret,
+    ).await {
         Ok(_)  => (axum::http::StatusCode::OK, "Crawl complete"),
         Err(e) => {
             eprintln!("Crawl error: {}", e);

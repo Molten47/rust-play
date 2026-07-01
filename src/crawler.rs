@@ -10,6 +10,13 @@ use crate::notifications::{insert_notification, CreateNotification};
 // ── Gmail API response shapes ─────────────────────────────────────────────────
 
 #[derive(Deserialize, Debug)]
+struct GoogleRefreshResponse {
+    access_token: String,
+    expires_in:   i64,
+}
+
+
+#[derive(Deserialize, Debug)]
 struct GmailListResponse {
     messages: Option<Vec<GmailMessageRef>>,
 }
@@ -70,6 +77,42 @@ fn parse_from_header(from: &str) -> (Option<String>, String) {
 }
 
 // ── Core crawler function ─────────────────────────────────────────────────────
+
+
+/// Exchange a stored refresh_token for a new short-lived access_token
+async fn refresh_google_access_token(
+    pool:          &PgPool,
+    user_id:       Uuid,
+    refresh_token: &str,
+    client_id:     &str,
+    client_secret: &str,
+) -> Result<String> {
+    let http = Client::new();
+
+    let res: GoogleRefreshResponse = http
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("refresh_token", refresh_token),
+            ("client_id",     client_id),
+            ("client_secret", client_secret),
+            ("grant_type",    "refresh_token"),
+        ])
+        .send()
+        .await?
+        .json::<GoogleRefreshResponse>()
+        .await?;
+
+    // Persist the new access token
+    sqlx::query!(
+        "UPDATE oauth_accounts SET access_token = $1 WHERE user_id = $2 AND provider = 'google'",
+        res.access_token,
+        user_id,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(res.access_token)
+}
 
 /// Crawl inbox for a single user using their stored Google access token
 pub async fn crawl_user_inbox(
@@ -167,13 +210,27 @@ pub async fn crawl_user_inbox(
             );
 
             // ── Step 4: Insert into priority_mail ────────────────────────────
-            insert_priority_mail(pool, &CreatePriorityMail {
-                sender_name:  email.sender_name.clone(),
-                sender_email: email.sender_email.clone(),
-                summary:      summary.clone(),
-                url_link:     url_link.clone(),
-                category:     keyword.category.clone(),
-            }).await?;
+      let result = insert_priority_mail(pool, &CreatePriorityMail {
+        sender_name:  email.sender_name.clone(),
+        sender_email: email.sender_email.clone(),
+        summary:      summary.clone(),
+        url_link:     url_link.clone(),
+        category:     keyword.category.clone(),
+        message_id:   Some(email.message_id.clone()),
+    }).await?;
+
+// Only insert notification if this is a new match (not a duplicate)
+if result.is_some() {
+    insert_notification(pool, &CreateNotification {
+        sender_name: email.sender_name.clone(),
+        summary: format!(
+            "Priority email from {}: {}",
+            email.sender_email,
+            &email.subject
+        ),
+    }).await?;
+    match_count += 1;
+}
 
             // ── Step 5: Insert notification ───────────────────────────────────
             insert_notification(pool, &CreateNotification {
@@ -203,11 +260,14 @@ pub async fn crawl_user_inbox(
 
 // ── Crawl all users ───────────────────────────────────────────────────────────
 
-/// Called by the background worker — crawls every linked Google account
-pub async fn crawl_all_users(pool: &PgPool) -> Result<()> {
+pub async fn crawl_all_users(
+    pool:                 &PgPool,
+    google_client_id:     &str,
+    google_client_secret: &str,
+) -> Result<()> {
     let accounts = sqlx::query!(
         r#"
-        SELECT user_id, access_token
+        SELECT user_id, access_token, refresh_token
         FROM oauth_accounts
         WHERE provider = 'google'
         "#
@@ -218,9 +278,31 @@ pub async fn crawl_all_users(pool: &PgPool) -> Result<()> {
     println!("🔄 Starting crawl for {} accounts", accounts.len());
 
     for account in accounts {
-        if let Err(e) = crawl_user_inbox(pool, account.user_id, &account.access_token).await {
+        // Refresh access token first using stored refresh_token
+        let access_token = match &account.refresh_token {
+            Some(rt) => {
+                match refresh_google_access_token(
+                    pool,
+                    account.user_id,
+                    rt,
+                    google_client_id,
+                    google_client_secret,
+                ).await {
+                    Ok(new_token) => new_token,
+                    Err(e) => {
+                        eprintln!("❌ Token refresh failed for user {}: {}", account.user_id, e);
+                        continue;
+                    }
+                }
+            }
+            None => {
+                eprintln!("⚠️  No refresh_token for user {} — re-login required", account.user_id);
+                continue;
+            }
+        };
+
+        if let Err(e) = crawl_user_inbox(pool, account.user_id, &access_token).await {
             eprintln!("❌ Crawl error for user {}: {}", account.user_id, e);
-            // Don't abort — continue crawling other users
         }
     }
 

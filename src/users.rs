@@ -39,8 +39,8 @@ pub async fn find_or_create_user(
     display_name: Option<&str>,
     avatar_url: Option<&str>,
     access_token: &str,
+    refresh_token: Option<&str>,   // new param
 ) -> anyhow::Result<User> {
-    // Check if OAuth account already exists
     let existing = sqlx::query_as!(
         User,
         r#"
@@ -56,10 +56,16 @@ pub async fn find_or_create_user(
     .await?;
 
     if let Some(user) = existing {
-        // Update access token on re-login
+        // Update access token always; only overwrite refresh_token if Google sent a new one
         sqlx::query!(
-            "UPDATE oauth_accounts SET access_token = $1 WHERE provider = $2 AND provider_uid = $3",
+            r#"
+            UPDATE oauth_accounts
+            SET access_token = $1,
+                refresh_token = COALESCE($2, refresh_token)
+            WHERE provider = $3 AND provider_uid = $4
+            "#,
             access_token,
+            refresh_token,
             provider,
             provider_uid,
         )
@@ -69,7 +75,6 @@ pub async fn find_or_create_user(
         return Ok(user);
     }
 
-    // New user — create user row then oauth_account row
     let user = sqlx::query_as!(
         User,
         r#"
@@ -85,20 +90,22 @@ pub async fn find_or_create_user(
 
     sqlx::query!(
         r#"
-        INSERT INTO oauth_accounts (user_id, provider, provider_uid, email, access_token)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO oauth_accounts (user_id, provider, provider_uid, email, access_token, refresh_token)
+        VALUES ($1, $2, $3, $4, $5, $6)
         "#,
         user.id,
         provider,
         provider_uid,
         email,
         access_token,
+        refresh_token,
     )
     .execute(pool)
     .await?;
 
     Ok(user)
 }
+
 
 /// Add an email address to watch for a user
 pub async fn add_watched_email(

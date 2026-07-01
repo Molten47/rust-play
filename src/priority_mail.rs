@@ -16,6 +16,7 @@ pub struct PriorityMail {
     pub summary:      String,
     pub url_link:     String,
     pub category:     Option<String>,
+    pub message_id:   Option<String>,
     pub created_at:   DateTime<Utc>,
 }
 
@@ -27,6 +28,7 @@ pub struct CreatePriorityMail {
     pub sender_email: String,
     pub summary:      String,
     pub url_link:     String,
+    pub message_id:   Option<String>,
     pub category:     Option<String>,
 }
 
@@ -35,21 +37,23 @@ pub struct CreatePriorityMail {
 pub async fn insert_priority_mail(
     pool: &PgPool,
     payload: &CreatePriorityMail,
-) -> anyhow::Result<PriorityMail> {
+) -> anyhow::Result<Option<PriorityMail>> {
     let record = sqlx::query_as!(
         PriorityMail,
         r#"
-        INSERT INTO priority_mail (sender_name, sender_email, summary, url_link, category)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, sender_name, sender_email, summary, url_link, category, created_at
+        INSERT INTO priority_mail (sender_name, sender_email, summary, url_link, category, message_id)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (message_id) DO NOTHING
+        RETURNING id, sender_name, sender_email, summary, url_link, category, message_id, created_at
         "#,
         payload.sender_name,
         payload.sender_email,
         payload.summary,
         payload.url_link,
         payload.category,
+        payload.message_id,
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(record)
@@ -59,7 +63,7 @@ pub async fn fetch_all_priority_mail(pool: &PgPool) -> anyhow::Result<Vec<Priori
     let records = sqlx::query_as!(
         PriorityMail,
         r#"
-        SELECT id, sender_name, sender_email, summary, url_link, category, created_at
+        SELECT id, sender_name, sender_email, summary, url_link, category, created_at, message_id
         FROM priority_mail
         ORDER BY created_at DESC
         "#
@@ -82,11 +86,10 @@ pub async fn list_priority_mail_handler(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-/// POST /priority-mail  — insert a new priority email record
 pub async fn create_priority_mail_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreatePriorityMail>,
-) -> Result<Json<PriorityMail>, StatusCode> {
+) -> Result<Json<Option<PriorityMail>>, StatusCode> {
     insert_priority_mail(&state.db, &payload)
         .await
         .map(Json)

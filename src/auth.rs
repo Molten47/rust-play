@@ -197,8 +197,9 @@ pub struct AuthResponse {
 
 #[derive(Deserialize, Debug)]
 struct GoogleTokenResponse {
-    access_token: String,
-    // We don't store id_token or scope but Google sends them
+    access_token:  String,
+    refresh_token: Option<String>,   // only sent on first consent, or with prompt=consent
+    expires_in:    Option<i64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -278,15 +279,16 @@ pub async fn google_callback_handler(
     };
 
     // ── Step 3: Find or create user in your DB ────────────────────────────────
-    let user = match find_or_create_user(
-        &state.db,
-        "google",
-        &google_user.id,
-        &google_user.email,
-        google_user.name.as_deref(),
-        google_user.picture.as_deref(),
-        &google_token.access_token,
-    ).await {
+   let user = match find_or_create_user(
+    &state.db,
+    "google",
+    &google_user.id,
+    &google_user.email,
+    google_user.name.as_deref(),
+    google_user.picture.as_deref(),
+    &google_token.access_token,
+    google_token.refresh_token.as_deref(),   // new arg
+).await {
         Ok(u) => u,
         Err(e) => {
             eprintln!("DB error on find_or_create_user: {}", e);
