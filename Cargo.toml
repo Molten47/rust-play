@@ -24,3 +24,4 @@ rand          = "0.8"        # secure token generation
 tower-http = { version = "0.6.11", features = ["cors", "limit", "set-header"] }
 tower = { version = "0.5.3", features = ["limit"] }
 ipnetwork = "0.20"
+async-trait = "0.1"
