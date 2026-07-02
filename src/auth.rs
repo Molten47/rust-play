@@ -15,8 +15,6 @@ use crate::AppState;
 use crate::users::find_or_create_user;
 use reqwest::Client;
 
-
-
 // ── JWT ───────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -48,6 +46,20 @@ pub fn verify_jwt(token: &str, secret: &str) -> anyhow::Result<JwtClaims> {
         &Validation::default(),
     )?;
     Ok(data.claims)
+}
+
+
+// _________ Rate Limiter ____________________________
+fn get_client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .split(',')
+        .next()
+        .unwrap_or("unknown")
+        .trim()
+        .to_string()
 }
 
 // ── Refresh tokens ────────────────────────────────────────────────────────────
@@ -183,6 +195,7 @@ fn argon2_verify(raw: &str, hash: &str) -> anyhow::Result<bool> {
 #[derive(Deserialize)]
 pub struct OAuthCallback {
     pub code:  String,
+    #[allow(dead_code)]
     pub state: Option<String>,
 }
 
@@ -199,6 +212,7 @@ pub struct AuthResponse {
 struct GoogleTokenResponse {
     access_token:  String,
     refresh_token: Option<String>,   // only sent on first consent, or with prompt=consent
+    #[allow(dead_code)]
     expires_in:    Option<i64>,
 }
 
@@ -218,10 +232,13 @@ pub async fn google_callback_handler(
     Query(params): Query<OAuthCallback>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    let ip = get_client_ip(&headers);
+
+// Rate limit auth endpoint
+    if !state.rate_limiter.check(&ip) {
+        eprintln!("🚫 Rate limit exceeded for IP: {}", ip);
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+}
 
     let user_agent = headers
         .get("user-agent")
@@ -308,7 +325,7 @@ pub async fn google_callback_handler(
     let refresh = match issue_refresh_token(
         &state.db,
         user.id,
-        ip.as_deref(),
+        Some(ip.as_str()),
         user_agent.as_deref(),
     ).await {
         Ok(t) => t,
@@ -354,15 +371,19 @@ pub async fn refresh_handler(
     headers: HeaderMap,
     Json(payload): Json<RefreshRequest>,
 ) -> impl IntoResponse {
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+ 
+
+    let ip = get_client_ip(&headers);
+
+    if !state.rate_limiter.check(&ip) {
+        eprintln!("🚫 Rate limit exceeded for IP: {}", ip);
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
 
     match rotate_refresh_token(
         &state.db,
         &payload.refresh_token,
-        ip.as_deref(),
+        Some(ip.as_str()),
         &state.jwt_secret,
     ).await {
         Ok((new_jwt, new_refresh)) => Json(AuthResponse {

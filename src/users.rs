@@ -12,6 +12,8 @@ pub struct User {
 }
 
 #[derive(Clone, Serialize, Deserialize, sqlx::FromRow, Debug)]
+#[allow(dead_code)]
+
 pub struct OAuthAccount {
     pub id:           Uuid,
     pub user_id:      Uuid,
@@ -22,6 +24,7 @@ pub struct OAuthAccount {
 }
 
 #[derive(Clone, Serialize, Deserialize, sqlx::FromRow, Debug)]
+#[allow(dead_code)]
 pub struct WatchedEmail {
     pub id:        Uuid,
     pub user_id:   Uuid,
@@ -108,6 +111,7 @@ pub async fn find_or_create_user(
 
 
 /// Add an email address to watch for a user
+#[allow(dead_code)]
 pub async fn add_watched_email(
     pool: &PgPool,
     user_id: Uuid,

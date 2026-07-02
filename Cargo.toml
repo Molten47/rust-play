@@ -21,5 +21,6 @@ oauth2        = "4.4"
 jsonwebtoken  = "9.3"
 argon2        = "0.5"        # for hashing refresh tokens before DB storage
 rand          = "0.8"        # secure token generation
-tower-http    = { version = "0.6.11", features = ["cors", "trace"] }
+tower-http = { version = "0.6.11", features = ["cors", "limit", "set-header"] }
+tower = { version = "0.5.3", features = ["limit"] }
 ipnetwork = "0.20"

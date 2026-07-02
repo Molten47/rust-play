@@ -12,6 +12,7 @@ use crate::notifications::{insert_notification, CreateNotification};
 #[derive(Deserialize, Debug)]
 struct GoogleRefreshResponse {
     access_token: String,
+    #[allow(dead_code)]
     expires_in:   i64,
 }
 
