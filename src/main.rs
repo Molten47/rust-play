@@ -81,7 +81,7 @@ let public = Router::new()
     .route("/auth/google/callback", get(auth::google_callback_handler))
     .route("/auth/refresh",         post(auth::refresh_handler));
 
-let app = Router::new()
+let app: Router =  Router::new()
     .merge(protected)
     .merge(public)
     .layer(CorsLayer::permissive())
@@ -129,8 +129,10 @@ let app = Router::new()
 }
 
 }
-    println!("🌐 API listening on http://localhost:3001");
-    axum::serve(listener, app).await?;
+    let port = env::var("PORT").unwrap_or_else(|_| "3001".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("🌐 API listening on http://{}", addr);
 
     Ok(())
 }

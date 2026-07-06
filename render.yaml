@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: rust-play
+    runtime: rust
+    buildCommand: cargo build --release
+    startCommand: ./target/release/rust-play
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
