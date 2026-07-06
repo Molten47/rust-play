@@ -70,7 +70,7 @@ let protected = Router::new()
     .route("/notifications/ws", get(notifications::notifications_ws_handler))
     .route("/crawl", post(crawl_trigger_handler))
     .route("/api-keys",      get(api_keys::list_api_keys_handler).post(api_keys::create_api_key_handler))
-    .route("/api-keys/:id",  delete(api_keys::revoke_api_key_handler))
+    .route("/api-keys/{id}",  delete(api_keys::revoke_api_key_handler))
     .layer(axum_middleware::from_fn_with_state(
         state.clone(),
         middleware::require_auth,
