@@ -1,0 +1,110 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, sender_name, sender_email, summary, url_link, category, created_at, message_id\n        FROM priority_mail\n        ORDER BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "sender_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "sender_email",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "sender_email"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "url_link",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "url_link"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "category",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "message_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "priority_mail",
+            "name": "message_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "ca92b7c77bb7af0235dc45f2403db5b768b41344b0e857c8be96fb65d89ce1e7"
+}
