@@ -96,10 +96,18 @@ pub async fn create_notification_handler(
 
 /// GET /notifications/ws — upgrades to WebSocket, pushes latest notification
 /// The Next.js frontend connects here to receive real-time push events
+use axum_extra::extract::CookieJar;
+
 pub async fn notifications_ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
+    jar: CookieJar,
 ) -> impl IntoResponse {
+    let token = jar.get("access_token").map(|c| c.value().to_string()).unwrap_or_default();
+
+    if crate::auth::verify_jwt(&token, &state.jwt_secret).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 

@@ -3,7 +3,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
-use crate::keywords::fetch_all_keywords;
+use crate::keywords::{fetch_all_keywords, find_matching_keyword};
 use crate::priority_mail::{insert_priority_mail, CreatePriorityMail};
 use crate::notifications::{insert_notification, CreateNotification};
 
@@ -129,21 +129,21 @@ pub async fn crawl_user_inbox(
     }
 
     // ── Step 1: List recent inbox messages (max 20) ───────────────────────────
- let list_res: GmailListResponse = http
-    .get("https://gmail.googleapis.com/gmail/v1/users/me/messages")
-    .bearer_auth(access_token)
-    .query(&[
-        ("maxResults", "20"),
-        ("labelIds",   "INBOX"),
-        ("q",          "is:unread"),
-    ])
-    .send()
-    .await?
-    .json::<GmailListResponse>()
-    .await?;
+    let list_res: GmailListResponse = http
+        .get("https://gmail.googleapis.com/gmail/v1/users/me/messages")
+        .bearer_auth(access_token)
+        .query(&[
+            ("maxResults", "20"),
+            ("labelIds",   "INBOX"),
+            ("q",          "is:unread"),
+        ])
+        .send()
+        .await?
+        .json::<GmailListResponse>()
+        .await?;
 
     let message_refs: Vec<GmailMessageRef> = match list_res.messages {
-    Some(msgs) if !msgs.is_empty() => msgs,
+        Some(msgs) if !msgs.is_empty() => msgs,
         _ => {
             println!("📭 No unread messages found for user {}", user_id);
             return Ok(0);
@@ -156,17 +156,17 @@ pub async fn crawl_user_inbox(
 
     // ── Step 2: Fetch + evaluate each message ─────────────────────────────────
     for msg_ref in message_refs {
-    let msg_res: GmailMessage = http
-        .get(format!(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
-            msg_ref.id
-        ))
-        .bearer_auth(access_token)
-        .query(&[("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")])
-        .send()
-        .await?
-        .json::<GmailMessage>()
-        .await?;
+        let msg_res: GmailMessage = http
+            .get(format!(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
+                msg_ref.id
+            ))
+            .bearer_auth(access_token)
+            .query(&[("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")])
+            .send()
+            .await?
+            .json::<GmailMessage>()
+            .await?;
 
         let from    = extract_header(&msg_res.payload.headers, "From").unwrap_or_default();
         let subject = extract_header(&msg_res.payload.headers, "Subject").unwrap_or_default();
@@ -182,19 +182,18 @@ pub async fn crawl_user_inbox(
             snippet:      snippet.clone(),
         };
 
-        // ── Step 3: Run keyword matching ──────────────────────────────────────
-        let body_to_scan = format!("{} {}", email.subject, email.snippet).to_lowercase();
+        // ── Step 3: Run keyword + sender matching ─────────────────────────────
+        let body_to_scan = format!("{} {}", email.subject, email.snippet);
 
-        let matched_keyword = keywords.iter().find(|kw| {
-            body_to_scan.contains(&kw.content.to_lowercase())
-        });
+        let matched_keyword = find_matching_keyword(&keywords, &email.sender_email, &body_to_scan);
 
         if let Some(keyword) = matched_keyword {
             println!(
-                "🎯 Match [{}] in email from {} — keyword: {}",
+                "🎯 Match [{}] in email from {} — rule content: {:?}, sender_pattern: {:?}",
                 email.message_id,
                 email.sender_email,
-                keyword.content
+                keyword.content,
+                keyword.sender_pattern,
             );
 
             // Build Gmail deep link
@@ -210,44 +209,31 @@ pub async fn crawl_user_inbox(
                 &email.snippet.chars().take(100).collect::<String>()
             );
 
-            // ── Step 4: Insert into priority_mail ────────────────────────────
-      let result = insert_priority_mail(pool, &CreatePriorityMail {
-        sender_name:  email.sender_name.clone(),
-        sender_email: email.sender_email.clone(),
-        summary:      summary.clone(),
-        url_link:     url_link.clone(),
-        category:     keyword.category.clone(),
-        message_id:   Some(email.message_id.clone()),
-    }).await?;
-
-// Only insert notification if this is a new match (not a duplicate)
-if result.is_some() {
-    insert_notification(pool, &CreateNotification {
-        sender_name: email.sender_name.clone(),
-        summary: format!(
-            "Priority email from {}: {}",
-            email.sender_email,
-            &email.subject
-        ),
-    }).await?;
-    match_count += 1;
-}
-
-            // ── Step 5: Insert notification ───────────────────────────────────
-            insert_notification(pool, &CreateNotification {
-                sender_name: email.sender_name.clone(),
-                summary:     format!(
-                    "Priority email from {}: {}",
-                    email.sender_email,
-                    &email.subject
-                ),
+            // ── Step 4: Insert into priority_mail (only notify on new matches) ─
+            let result = insert_priority_mail(pool, &CreatePriorityMail {
+                sender_name:  email.sender_name.clone(),
+                sender_email: email.sender_email.clone(),
+                summary:      summary.clone(),
+                url_link:     url_link.clone(),
+                category:     keyword.category.clone(),
+                message_id:   Some(email.message_id.clone()),
             }).await?;
 
-            match_count += 1;
+            if result.is_some() {
+                insert_notification(pool, &CreateNotification {
+                    sender_name: email.sender_name.clone(),
+                    summary: format!(
+                        "Priority email from {}: {}",
+                        email.sender_email,
+                        &email.subject
+                    ),
+                }).await?;
+                match_count += 1;
+            }
         }
     }
 
-    // ── Step 6: Update last crawled timestamp ─────────────────────────────────
+    // ── Step 5: Update last crawled timestamp ─────────────────────────────────
     sqlx::query!(
         "UPDATE oauth_accounts SET last_crawled_at = NOW() WHERE user_id = $1 AND provider = 'google'",
         user_id,
@@ -279,7 +265,6 @@ pub async fn crawl_all_users(
     println!("🔄 Starting crawl for {} accounts", accounts.len());
 
     for account in accounts {
-        // Refresh access token first using stored refresh_token
         let access_token = match &account.refresh_token {
             Some(rt) => {
                 match refresh_google_access_token(

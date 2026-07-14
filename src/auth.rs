@@ -14,6 +14,8 @@ use rand::Rng;
 use crate::AppState;
 use crate::users::find_or_create_user;
 use reqwest::Client;
+use axum_extra::extract::cookie::{Cookie, SameSite};
+use time::Duration as CookieDuration;
 
 // ── JWT ───────────────────────────────────────────────────────────────────────
 
@@ -335,11 +337,56 @@ pub async fn google_callback_handler(
         }
     };
 
-    Json(AuthResponse {
-        access_token:  jwt,
-        refresh_token: refresh,
-        user_id:       user.id.to_string(),
-    }).into_response()
+    // ── Step 5: Build cookies and redirect back to the frontend ───────────────
+  let frontend_url = std::env::var("FRONTEND_URL")
+    .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+    let redirect_target = format!("{}/dashboard", frontend_url);
+
+    let mut response = axum::response::Redirect::temporary(&redirect_target)
+        .into_response();
+
+    let is_prod = std::env::var("APP_ENV").unwrap_or_default() == "production";
+
+    let access_cookie = Cookie::build(("access_token", jwt))
+        .http_only(true)
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::minutes(15))
+        .build();
+
+    let refresh_cookie = Cookie::build(("refresh_token", refresh))
+        .http_only(true)
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::days(7))
+        .build();
+
+    let user_id_cookie = Cookie::build(("user_id", user.id.to_string()))
+        .http_only(false)
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::days(7))
+        .build();
+
+    let headers = response.headers_mut();
+    headers.append(
+        axum::http::header::SET_COOKIE,
+        access_cookie.to_string().parse().unwrap(),
+    );
+    headers.append(
+        axum::http::header::SET_COOKIE,
+        refresh_cookie.to_string().parse().unwrap(),
+    );
+    headers.append(
+        axum::http::header::SET_COOKIE,
+        user_id_cookie.to_string().parse().unwrap(),
+    );
+
+    response
 }
 
 /// GET /auth/google/login  — redirects user to Google consent screen
@@ -366,13 +413,13 @@ pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
+use axum_extra::extract::CookieJar;
+
 pub async fn refresh_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(payload): Json<RefreshRequest>,
+    jar: CookieJar,
 ) -> impl IntoResponse {
- 
-
     let ip = get_client_ip(&headers);
 
     if !state.rate_limiter.check(&ip) {
@@ -380,20 +427,66 @@ pub async fn refresh_handler(
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
 
-    match rotate_refresh_token(
-        &state.db,
-        &payload.refresh_token,
-        Some(ip.as_str()),
-        &state.jwt_secret,
-    ).await {
-        Ok((new_jwt, new_refresh)) => Json(AuthResponse {
-            access_token:  new_jwt,
-            refresh_token: new_refresh,
-            user_id:       String::new(), // client already knows their user_id
-        }).into_response(),
+    let raw_refresh = match jar.get("refresh_token") {
+        Some(c) => c.value().to_string(),
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    match rotate_refresh_token(&state.db, &raw_refresh, Some(ip.as_str()), &state.jwt_secret).await {
+        Ok((new_jwt, new_refresh)) => {
+            let is_prod = std::env::var("APP_ENV").unwrap_or_default() == "production";
+
+            let access_cookie = Cookie::build(("access_token", new_jwt))
+                .http_only(true).secure(is_prod).same_site(SameSite::Lax)
+                .path("/").max_age(CookieDuration::minutes(15)).build();
+
+            let refresh_cookie = Cookie::build(("refresh_token", new_refresh))
+                .http_only(true).secure(is_prod).same_site(SameSite::Lax)
+                .path("/").max_age(CookieDuration::days(7)).build();
+
+            let mut response = StatusCode::OK.into_response();
+            let headers = response.headers_mut();
+            headers.append(axum::http::header::SET_COOKIE, access_cookie.to_string().parse().unwrap());
+            headers.append(axum::http::header::SET_COOKIE, refresh_cookie.to_string().parse().unwrap());
+            response
+        }
         Err(e) => {
             eprintln!("Refresh error: {}", e);
             StatusCode::UNAUTHORIZED.into_response()
         }
     }
+}
+
+pub async fn logout_handler() -> impl IntoResponse {
+    let is_prod = std::env::var("APP_ENV").unwrap_or_default() == "production";
+
+    let clear_access = Cookie::build(("access_token", ""))
+        .http_only(true)
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::seconds(0))
+        .build();
+
+    let clear_refresh = Cookie::build(("refresh_token", ""))
+        .http_only(true)
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::seconds(0))
+        .build();
+
+    let clear_user = Cookie::build(("user_id", ""))
+        .secure(is_prod)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(CookieDuration::seconds(0))
+        .build();
+
+    let mut response = axum::http::StatusCode::OK.into_response();
+    let headers = response.headers_mut();
+    headers.append(axum::http::header::SET_COOKIE, clear_access.to_string().parse().unwrap());
+    headers.append(axum::http::header::SET_COOKIE, clear_refresh.to_string().parse().unwrap());
+    headers.append(axum::http::header::SET_COOKIE, clear_user.to_string().parse().unwrap());
+    response
 }

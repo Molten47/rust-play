@@ -1,7 +1,6 @@
 use axum::{routing::{get, post, delete}, Router, extract::State};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
 use dotenvy::dotenv;
 use std::env;
 use axum::middleware as axum_middleware;
@@ -10,6 +9,7 @@ use security::RateLimiter;
 use tower_http::set_header::SetResponseHeaderLayer;
 use axum::http::header::{X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS, HeaderValue};
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::cors::CorsLayer;
 
 mod keywords;
 mod priority_mail;
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let protected = Router::new()
-        .route("/keywords",         get(keywords::list_keywords_handler))
+        .route("/keywords", get(keywords::list_keywords_handler).post(keywords::create_keyword_handler))
         .route("/priority-mail",    get(priority_mail::list_priority_mail_handler).post(priority_mail::create_priority_mail_handler))
         .route("/notifications",    get(notifications::list_notifications_handler).post(notifications::create_notification_handler))
         .route("/notifications/ws", get(notifications::notifications_ws_handler))
@@ -69,13 +69,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public = Router::new()
         .route("/auth/google/login",    get(auth::google_login_handler))
         .route("/auth/google/callback", get(auth::google_callback_handler))
-        .route("/auth/refresh",         post(auth::refresh_handler));
+        .route("/auth/refresh",         post(auth::refresh_handler))
+        .route("/auth/logout", post(auth::logout_handler));
+
+    let cors = CorsLayer::new()
+    .allow_origin(
+        std::env::var("FRONTEND_URL")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string())
+            .parse::<HeaderValue>()
+            .unwrap()
+    )
+    .allow_methods([
+        axum::http::Method::GET,
+        axum::http::Method::POST,
+        axum::http::Method::DELETE,
+    ])
+    .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+    .allow_credentials(true);
+
 
     let app: Router = Router::new()
         .merge(protected)
         .merge(public)
-        .layer(CorsLayer::permissive())
         .layer(RequestBodyLimitLayer::new(1024 * 16))
+        .layer(cors)
         .layer(SetResponseHeaderLayer::overriding(
             X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
@@ -85,6 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             HeaderValue::from_static("DENY"),
         ))
         .with_state(state.clone());
+
+ 
+    
 
     // ── Background crawler loop ───────────────────────────────────────────────
     {
