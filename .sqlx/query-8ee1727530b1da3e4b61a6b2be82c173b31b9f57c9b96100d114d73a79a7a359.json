@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, sender_name, sender_email, summary, url_link, category, created_at, message_id\n        FROM priority_mail\n        ORDER BY created_at DESC\n        ",
+  "query": "\n                SELECT id, sender_name, sender_email, summary, url_link, category, created_at, message_id\n                FROM priority_mail\n                WHERE (created_at, id) < ($1, $2)\n                ORDER BY created_at DESC, id DESC\n                LIMIT $3\n                ",
   "describe": {
     "columns": [
       {
@@ -93,7 +93,11 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -106,5 +110,5 @@
       true
     ]
   },
-  "hash": "ca92b7c77bb7af0235dc45f2403db5b768b41344b0e857c8be96fb65d89ce1e7"
+  "hash": "8ee1727530b1da3e4b61a6b2be82c173b31b9f57c9b96100d114d73a79a7a359"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, category, content FROM keywords",
+  "query": "SELECT id, category, content, sender_pattern FROM keywords",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "content"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "keywords",
+            "name": "sender_pattern"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +54,9 @@
     "nullable": [
       false,
       true,
-      false
+      true,
+      true
     ]
   },
-  "hash": "6db308d44f8d61df25e72b591a72928978b522d8a99dff6ef95568d21853b01d"
+  "hash": "fa18769b82f6910a16ede42b96d6e8ccf5db42d0db69f3d5dd15a649dc8fd7de"
 }
