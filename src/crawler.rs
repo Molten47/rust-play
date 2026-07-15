@@ -196,12 +196,8 @@ pub async fn crawl_user_inbox(
                 keyword.sender_pattern,
             );
 
-            
-           // Search-based link — reliable on both desktop and mobile,
-// since Gmail doesn't support jumping straight to a specific
-// message via external deep link on mobile web.
             let url_link = format!(
-                "https://mail.google.com/mail/u/0/#search/{}",
+               "https://mail.google.com/mail/u/0/?ui=2#search/{}",
                 urlencoding::encode(&format!("subject:\"{}\"", email.subject))
             );
 
