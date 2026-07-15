@@ -198,8 +198,8 @@ pub async fn crawl_user_inbox(
 
             // Build Gmail deep link
             let url_link = format!(
-                "https://mail.google.com/mail/u/0/#inbox/{}",
-                email.message_id
+            "https://mail.google.com/mail/u/0/#all/{}",
+            email.message_id
             );
 
             let summary = format!(
