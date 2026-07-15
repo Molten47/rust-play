@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO oauth_accounts (user_id, provider, provider_uid, email, access_token, refresh_token)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7503c061a2df76d3833835f879e1091ac4bda7c27cb6f71a97635c0c536b902"
+}

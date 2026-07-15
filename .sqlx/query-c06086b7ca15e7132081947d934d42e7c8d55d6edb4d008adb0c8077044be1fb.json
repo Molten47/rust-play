@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_accounts\n            SET access_token = $1,\n                refresh_token = COALESCE($2, refresh_token)\n            WHERE provider = $3 AND provider_uid = $4\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c06086b7ca15e7132081947d934d42e7c8d55d6edb4d008adb0c8077044be1fb"
+}
