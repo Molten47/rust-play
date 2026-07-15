@@ -115,6 +115,30 @@ async fn refresh_google_access_token(
     Ok(res.access_token)
 }
 
+/// Builds a forgiving Gmail search query: sender + first few subject words.
+/// Avoids exact-phrase quoting, since punctuation (%, em dashes, smart quotes)
+/// in real-world subjects causes zero-result searches — and Gmail redirects
+/// to a default view on zero results, even with ui=2 set.
+fn build_gmail_search_link(sender_email: &str, subject: &str) -> String {
+    let clean_subject: String = subject
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+        .collect();
+
+    let subject_words: String = clean_subject
+        .split_whitespace()
+        .take(6) // first 6 words is usually enough to be near-unique
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let query = format!("from:{} {}", sender_email, subject_words);
+
+    format!(
+        "https://mail.google.com/mail/u/0/?ui=2#search/{}",
+        urlencoding::encode(&query)
+    )
+}
+
 /// Crawl inbox for a single user using their stored Google access token
 pub async fn crawl_user_inbox(
     pool:         &PgPool,
@@ -196,10 +220,7 @@ pub async fn crawl_user_inbox(
                 keyword.sender_pattern,
             );
 
-            let url_link = format!(
-               "https://mail.google.com/mail/u/0/?ui=2#search/{}",
-                urlencoding::encode(&format!("subject:\"{}\"", email.subject))
-            );
+            let url_link = build_gmail_search_link(&email.sender_email, &email.subject);
 
             let summary = format!(
                 "[{}] {} — {}",
@@ -293,3 +314,4 @@ pub async fn crawl_all_users(
 
     Ok(())
 }
+
