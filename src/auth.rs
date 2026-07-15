@@ -210,8 +210,8 @@ struct GoogleUserInfo {
 
 /// Cross-site deployments (Vercel + Render) need SameSite=None + Secure.
 /// Locally, Lax + non-secure works fine over http://localhost.
-fn cookie_same_site(is_prod: bool) -> SameSite {
-    if is_prod { SameSite::None } else { SameSite::Lax }
+fn cookie_same_site(_is_prod: bool) -> SameSite {
+    SameSite::Lax
 }
 
 // ── Axum handlers ─────────────────────────────────────────────────────────────
